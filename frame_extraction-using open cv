@@ -1,0 +1,260 @@
+import cv2
+import os
+import sys
+import numpy as np
+import argparse
+import logging
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, Tuple, List
+import json
+
+class GalaxyFrameExtractor:
+    def __init__(self, video_path: str, output_dir: str = 'galaxy_frames'):
+        """
+        Advanced frame extraction pipeline for galaxy videos.
+        """
+        self.video_path = Path(video_path)
+        self.output_dir = Path(output_dir)
+        self.logger = self._setup_logging()
+        
+        # Video properties cache
+        self.fps = 0.0
+        self.total_frames = 0
+        self.duration = 0.0
+        self.frame_size = (0, 0)
+        
+        # Extraction stats
+        self.extracted_frames = 0
+        self.skipped_frames = 0
+        self.failed_saves = 0
+        
+        self._validate_inputs()
+    
+    def _setup_logging(self) -> logging.Logger:
+        """Configure comprehensive logging."""
+        log_dir = self.output_dir / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_dir / f'extraction_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        return logging.getLogger(__name__)
+    
+    def _validate_inputs(self) -> None:
+        """Comprehensive input validation."""
+        if not self.video_path.exists():
+            raise FileNotFoundError(f"Video file not found: {self.video_path}")
+        
+        if not self.video_path.suffix.lower() in ['.mp4', '.avi', '.mov', '.mkv']:
+            self.logger.warning(f"Video format {self.video_path.suffix} may not be fully supported")
+        
+        self.logger.info(f"Input validated: {self.video_path} ({self.video_path.stat().st_size / (1024**2):.1f} MB)")
+    
+    def analyze_video(self) -> dict:
+        """Detailed video analysis before extraction."""
+        cap = cv2.VideoCapture(str(self.video_path))
+        
+        if not cap.isOpened():
+            raise RuntimeError("Failed to open video for analysis")
+        
+        # Extract all video properties
+        self.fps = cap.get(cv2.CAP_PROP_FPS)
+        self.total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.duration = self.total_frames / self.fps if self.fps > 0 else 0
+        self.frame_size = (
+            int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        )
+        
+        cap.release()
+        
+        analysis = {
+            'fps': self.fps,
+            'total_frames': self.total_frames,
+            'duration_seconds': self.duration,
+            'frame_size': self.frame_size,
+            'file_size_mb': self.video_path.stat().st_size / (1024**2),
+            'extraction_estimate': {
+                'all_frames': self.total_frames,
+                '1fps': int(self.fps),
+                '5fps': int(self.fps * 5)
+            }
+        }
+        
+        # Save analysis report
+        self.output_dir.mkdir(exist_ok=True)
+        with open(self.output_dir / 'video_analysis.json', 'w') as f:
+            json.dump(analysis, f, indent=2)
+        
+        self.logger.info(f"Video analysis complete: {self.duration:.1f}s, {self.total_frames} frames, {self.frame_size[0]}x{self.frame_size[1]}")
+        return analysis
+    
+    def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Advanced frame preprocessing for galaxy footage.
+        Enhance contrast, reduce noise, sharpen details.
+        """
+        # Convert to LAB for better color processing
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # Enhance brightness/contrast for space scenes
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        
+        # Merge back and sharpen
+        enhanced = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        
+        # Unsharp mask for star detail enhancement
+        gaussian = cv2.GaussianBlur(enhanced, (0, 0), 2.0)
+        sharpened = cv2.addWeighted(enhanced, 1.5, gaussian, -0.5, 0)
+        
+        return sharpened
+    
+    def extract_frames(
+        self,
+        interval: int = 1,
+        preprocess: bool = True,
+        quality: int = 95,
+        resize_to: Optional[Tuple[int, int]] = None,
+        start_time: float = 0.0,
+        end_time: Optional[float] = None
+    ) -> dict:
+        """
+        Main extraction pipeline with full control.
+        
+        Args:
+            interval: Extract every Nth frame (1=all frames)
+            preprocess: Apply galaxy enhancement
+            quality: JPEG quality (1-100)
+            resize_to: Resize frames to (width, height)
+            start_time: Skip to this time in seconds
+            end_time: Stop at this time in seconds
+        """
+        self.logger.info(f"Starting extraction: interval={interval}, preprocess={preprocess}, quality={quality}")
+        
+        cap = cv2.VideoCapture(str(self.video_path))
+        if not cap.isOpened():
+            raise RuntimeError("Cannot open video for extraction")
+        
+        # Set time boundaries
+        if start_time > 0:
+            cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
+        
+        frame_count = 0
+        extracted_count = 0
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Time boundary check
+            current_time = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+            if end_time and current_time > end_time:
+                break
+            
+            # Frame selection
+            if frame_count % interval == 0:
+                try:
+                    # Preprocessing pipeline
+                    if preprocess:
+                        frame = self.preprocess_frame(frame)
+                    
+                    # Resize if specified
+                    if resize_to:
+                        frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_LANCZOS4)
+                    
+                    # Generate filename with timestamp
+                    timestamp = current_time
+                    filename = f'galaxy_frame_{frame_count:06d}_t{timestamp:06.2f}s.jpg'
+                    filepath = self.output_dir / filename
+                    
+                    # High-quality save with metadata
+                    success = cv2.imwrite(
+                        str(filepath),
+                        frame,
+                        [cv2.IMWRITE_JPEG_QUALITY, quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
+                    )
+                    
+                    if success:
+                        extracted_count += 1
+                        if extracted_count % 20 == 0:
+                            self.logger.info(f"Progress: {extracted_count} frames extracted ({frame_count}/{self.total_frames})")
+                    else:
+                        self.failed_saves += 1
+                        self.logger.error(f"Failed to save: {filepath}")
+                
+                except Exception as e:
+                    self.logger.error(f"Frame processing error at {frame_count}: {e}")
+                    self.skipped_frames += 1
+            
+            frame_count += 1
+        
+        cap.release()
+        
+        # Final stats
+        stats = {
+            'total_processed': frame_count,
+            'extracted_frames': extracted_count,
+            'skipped_frames': self.skipped_frames,
+            'failed_saves': self.failed_saves,
+            'output_directory': str(self.output_dir),
+            'extraction_time': datetime.now().isoformat()
+        }
+        
+        self.logger.info(f"✅ Extraction complete: {stats}")
+        self._save_stats(stats)
+        return stats
+    
+    def _save_stats(self, stats: dict) -> None:
+        """Save extraction statistics."""
+        stats_path = self.output_dir / 'extraction_stats.json'
+        with open(stats_path, 'w') as f:
+            json.dump(stats, f, indent=2)
+
+def main():
+    """Command line interface."""
+    parser = argparse.ArgumentParser(description="Galaxy Frame Extraction Pipeline")
+    parser.add_argument('video', help="Input video file (e.g., galaxy_video.mp4)")
+    parser.add_argument('-o', '--output', default='galaxy_frames', help="Output directory")
+    parser.add_argument('-i', '--interval', type=int, default=1, help="Frame interval (1=all)")
+    parser.add_argument('--preprocess', action='store_true', help="Apply galaxy enhancement")
+    parser.add_argument('--quality', type=int, default=95, help="JPEG quality (1-100)")
+    parser.add_argument('--resize', nargs=2, type=int, metavar=('W', 'H'), help="Resize to WxH")
+    parser.add_argument('--start', type=float, default=0, help="Start time (seconds)")
+    parser.add_argument('--end', type=float, help="End time (seconds)")
+    
+    args = parser.parse_args()
+    
+    try:
+        extractor = GalaxyFrameExtractor(args.video, args.output)
+        extractor.analyze_video()
+        
+        resize_to = tuple(args.resize) if args.resize else None
+        stats = extractor.extract_frames(
+            interval=args.interval,
+            preprocess=args.preprocess,
+            quality=args.quality,
+            resize_to=resize_to,
+            start_time=args.start,
+            end_time=args.end
+        )
+        
+        print(f"\n🎉 Pipeline completed successfully!")
+        print(f"📁 Frames saved to: {args.output}")
+        print(f"🖼️  Total frames: {stats['extracted_frames']}")
+        
+    except Exception as e:
+        print(f"❌ Pipeline failed: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
