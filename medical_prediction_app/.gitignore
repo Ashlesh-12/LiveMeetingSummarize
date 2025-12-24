@@ -1,0 +1,8 @@
+me_pre/
+etc/
+Include/
+Lib/
+Scripts/
+share/
+*.pkl
+*.csv
