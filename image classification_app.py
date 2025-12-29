@@ -39,3 +39,4 @@ if uploaded_file is not None:
 
     st.subheader("Prediction")
     st.success(prediction)
+
