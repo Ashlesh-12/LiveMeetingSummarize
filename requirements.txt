@@ -1,0 +1,15 @@
+# requirements.txt
+streamlit
+numpy
+sounddevice
+soundfile
+torch
+openai-whisper
+python-dotenv
+librosa
+scipy
+matplotlib
+transformers
+sentencepiece
+fpdf2
+scikit-learn
