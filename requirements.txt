@@ -1,0 +1,31 @@
+# Core app
+streamlit>=1.32.0
+numpy
+scipy
+soundfile
+python-dotenv
+bcrypt
+
+# Browser-based audio recording
+audio-recorder-streamlit
+librosa
+
+# Speech-to-text — CPU-only PyTorch to reduce image size
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
+torchaudio==2.3.1+cpu
+openai-whisper
+
+# AI Summarisation — PyTorch backend only (no TensorFlow needed)
+transformers==4.41.2
+sentencepiece
+accelerate
+
+# Analytics & export
+matplotlib
+scikit-learn
+textblob
+fpdf2
+
+# Misc
+protobuf>=3.20,<6
