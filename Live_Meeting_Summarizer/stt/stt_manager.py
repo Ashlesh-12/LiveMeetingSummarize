@@ -1,10 +1,11 @@
 # stt/stt_manager.py
-import os
 import numpy as np
 import soundfile as sf
-import librosa
+import logging
 from stt.whisper_stt import transcribe
 from config.settings import AUDIO_SETTINGS
+
+logger = logging.getLogger(__name__)
 
 def read_audio_file(file_path):
     """Read audio file and return numpy array."""
@@ -17,14 +18,16 @@ def read_audio_file(file_path):
                 audio = np.mean(audio, axis=1)
             # Resample if needed
             if sr != AUDIO_SETTINGS['SAMPLE_RATE']:
+                import librosa
                 audio = librosa.resample(audio, orig_sr=sr, target_sr=AUDIO_SETTINGS['SAMPLE_RATE'])
             return audio
         except Exception as e:
-            print(f"Error reading with soundfile: {e}, trying with librosa...")
+            logger.warning("Error reading with soundfile (%s); trying with librosa", e)
+            import librosa
             audio, sr = librosa.load(file_path, sr=AUDIO_SETTINGS['SAMPLE_RATE'], mono=True)
             return audio
     except Exception as e:
-        print(f"Error reading audio file: {e}")
+        logger.error("Error reading audio file %s: %s", file_path, e)
         raise
 
 def get_full_transcript(audio_source, is_file=True):
@@ -36,10 +39,10 @@ def get_full_transcript(audio_source, is_file=True):
             audio_data = audio_source
             
         if len(audio_data) == 0:
-            return "Error: Empty audio data"
+            return ""
             
         # Transcribe the audio
         return transcribe(audio_data)
     except Exception as e:
-        print(f"Error in get_full_transcript: {e}")
-        return f"Error: {str(e)}"
+        logger.error("Error in get_full_transcript: %s", e)
+        return ""

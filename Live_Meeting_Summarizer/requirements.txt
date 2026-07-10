@@ -13,3 +13,8 @@ transformers
 sentencepiece
 fpdf2
 scikit-learn
+bcrypt
+textblob
+protobuf>=3.20,<6
+audio-recorder-streamlit
+tf-keras

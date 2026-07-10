@@ -2,12 +2,13 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+import torch
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from project root
+load_dotenv(BASE_DIR / ".env")
 
 # Audio settings
 AUDIO_SETTINGS = {
@@ -30,6 +31,6 @@ EMAIL_SETTINGS = {
 
 # Whisper settings
 WHISPER_SETTINGS = {
-    'MODEL_SIZE': 'base',  # base, small, medium, large
-    'DEVICE': 'cuda' if os.getenv('CUDA_AVAILABLE') == 'true' else 'cpu'
+    'MODEL_SIZE': os.getenv('WHISPER_MODEL_SIZE', 'base'),  # tiny/base/small/medium/large
+    'DEVICE': 'cuda' if torch.cuda.is_available() else 'cpu'
 }
