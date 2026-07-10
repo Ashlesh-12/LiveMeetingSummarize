@@ -1,20 +1,31 @@
-# requirements.txt
-streamlit
+# Core app
+streamlit>=1.32.0
 numpy
-sounddevice
-soundfile
-torch
-openai-whisper
-python-dotenv
-librosa
 scipy
-matplotlib
-transformers
-sentencepiece
-fpdf2
-scikit-learn
+soundfile
+python-dotenv
 bcrypt
-textblob
-protobuf>=3.20,<6
+
+# Audio (browser-based recording — no sounddevice needed)
 audio-recorder-streamlit
-tf-keras
+librosa
+
+# Speech-to-text (CPU-only torch to keep image size manageable)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
+torchaudio==2.3.1+cpu
+openai-whisper
+
+# Summarisation (PyTorch backend only, avoids heavy TensorFlow)
+transformers==4.41.2
+sentencepiece
+accelerate
+
+# Analytics & export
+matplotlib
+scikit-learn
+textblob
+fpdf2
+
+# Misc
+protobuf>=3.20,<6

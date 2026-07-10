@@ -244,15 +244,38 @@ def _process_audio_file(file_path):
 
 
 # --- AUTHENTICATION LOGIC ---
+def _seed_users_from_secrets():
+    """
+    On fresh cloud deployments users.json won't exist.
+    Read initial users from st.secrets (TOML format) if configured,
+    otherwise create a safe demo account: demo / demo1234
+    """
+    try:
+        # Streamlit Secrets: [users] section with username = "bcrypt_hash"
+        secret_users = st.secrets.get("users", {})
+        if secret_users:
+            save_users(dict(secret_users))
+            return dict(secret_users)
+    except Exception:
+        pass
+
+    # Fallback: create a demo user so the app is always accessible
+    demo_pw = hash_password("demo1234")
+    default = {"demo": demo_pw}
+    save_users(default)
+    return default
+
+
 def load_users():
     if not os.path.exists(USER_DB_FILE):
-        return {}
+        return _seed_users_from_secrets()
     try:
         with open(USER_DB_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
 
 
 def save_users(users):

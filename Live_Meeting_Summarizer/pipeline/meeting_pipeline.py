@@ -22,7 +22,8 @@ def load_model():
         summarizer = pipeline(
             "summarization",
             model="sshleifer/distilbart-cnn-12-6",
-            device=device
+            device=device,
+            framework="pt",   # force PyTorch — avoids TF import on cloud
         )
         logger.info("Summarization model loaded.")
     except Exception as e:
