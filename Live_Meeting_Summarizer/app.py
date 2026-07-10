@@ -244,43 +244,50 @@ def _process_audio_file(file_path):
 
 
 # --- AUTHENTICATION LOGIC ---
-def _seed_users_from_secrets():
+def load_users():
     """
-    On fresh cloud deployments users.json won't exist.
-    Read initial users from st.secrets (TOML format) if configured,
-    otherwise create a safe demo account: demo / demo1234
+    Loads users from users.json, merging them with secrets from st.secrets if present,
+    and falls back to a default demo account if no database exists.
     """
+    users = {}
+    
+    # 1. Load users from Streamlit secrets (TOML format)
     try:
-        # Streamlit Secrets: [users] section with username = "bcrypt_hash"
         secret_users = st.secrets.get("users", {})
         if secret_users:
-            save_users(dict(secret_users))
-            return dict(secret_users)
+            users.update({str(k).strip().lower(): str(v) for k, v in secret_users.items()})
     except Exception:
         pass
 
-    # Fallback: create a demo user so the app is always accessible
-    demo_pw = hash_password("demo1234")
-    default = {"demo": demo_pw}
-    save_users(default)
-    return default
+    # 2. Load/merge users from users.json file
+    if os.path.exists(USER_DB_FILE):
+        try:
+            with open(USER_DB_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    users.update({str(k).strip().lower(): str(v) for k, v in data.items()})
+        except Exception:
+            pass
+    elif users:
+        # Seed users.json if it doesn't exist but we have secret users
+        save_users(users)
 
+    # 3. Fallback: if no users are configured anywhere, seed demo/demo1234
+    if not users:
+        demo_pw = hash_password("demo1234")
+        users = {"demo": demo_pw}
+        save_users(users)
 
-def load_users():
-    if not os.path.exists(USER_DB_FILE):
-        return _seed_users_from_secrets()
-    try:
-        with open(USER_DB_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
+    return users
 
 
 def save_users(users):
-    with open(USER_DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f)
+    try:
+        normalized_users = {str(k).strip().lower(): str(v) for k, v in users.items()}
+        with open(USER_DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(normalized_users, f, indent=4)
+    except Exception as e:
+        logger.error(f"Failed to save user database: {e}")
 
 
 def hash_password(password):
@@ -303,31 +310,45 @@ def login_page():
 
         with tab_login:
             with st.form("login_form"):
-                username = st.text_input("Username")
-                password = st.text_input("Password", type="password")
+                username_input = st.text_input("Username").strip()
+                password_input = st.text_input("Password", type="password")
                 if st.form_submit_button("Log In", type="primary"):
-                    users = load_users()
-                    if username in users and check_password(password, users[username]):
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.rerun()
+                    if not username_input or not password_input:
+                        st.error("Please enter both username and password.")
                     else:
-                        st.error("Invalid credentials.")
+                        username_lower = username_input.lower()
+                        users = load_users()
+                        if username_lower in users and check_password(password_input, users[username_lower]):
+                            st.session_state.authenticated = True
+                            st.session_state.username = username_input
+                            st.rerun()
+                        else:
+                            st.error("Invalid credentials.")
 
         with tab_signup:
             with st.form("signup_form"):
-                new_user = st.text_input("Choose Username")
-                new_pass = st.text_input("Choose Password", type="password")
+                new_user_input = st.text_input("Choose Username").strip()
+                new_pass_input = st.text_input("Choose Password", type="password")
                 if st.form_submit_button("Sign Up"):
-                    users = load_users()
-                    if new_user in users:
-                        st.warning("Username exists.")
-                    elif len(new_pass) < 4:
-                        st.warning("Password too short.")
+                    import re
+                    new_user_lower = new_user_input.lower()
+                    if not new_user_input:
+                        st.warning("Username cannot be empty.")
+                    elif not re.match(r"^[a-zA-Z0-9_.]+$", new_user_input):
+                        st.warning("Username must only contain alphanumeric characters, underscores, or dots.")
+                    elif len(new_pass_input) < 4:
+                        st.warning("Password must be at least 4 characters long.")
                     else:
-                        users[new_user] = hash_password(new_pass)
-                        save_users(users)
-                        st.success("Account created. Please log in.")
+                        users = load_users()
+                        if new_user_lower in users:
+                            st.warning("Username already exists.")
+                        else:
+                            users[new_user_lower] = hash_password(new_pass_input)
+                            save_users(users)
+                            st.success("Account created successfully! Logging you in...")
+                            st.session_state.authenticated = True
+                            st.session_state.username = new_user_input
+                            st.rerun()
 
 
 # --- MAIN APP LOGIC ---
