@@ -10,15 +10,10 @@ bcrypt
 audio-recorder-streamlit
 librosa
 
-# Speech-to-text
+# Speech-to-text (Whisper uses torch internally)
 torch
 torchaudio
 openai-whisper
-
-# Summarisation (PyTorch backend only, avoids heavy TensorFlow)
-transformers==4.41.2
-sentencepiece
-accelerate
 
 # Analytics & export
 matplotlib
