@@ -18,12 +18,12 @@ def load_model():
     try:
         logger.info("Loading summarization model...")
         device = 0 if torch.cuda.is_available() else -1
-        # DistilBART is a good speed/quality tradeoff for meeting notes.
+        # t5-small is a very light model (~240MB) suitable for Streamlit Cloud constraints.
         summarizer = pipeline(
             "summarization",
-            model="sshleifer/distilbart-cnn-12-6",
+            model="t5-small",
             device=device,
-            framework="pt",   # force PyTorch — avoids TF import on cloud
+            framework="pt",   # force PyTorch
         )
         logger.info("Summarization model loaded.")
     except Exception as e:
@@ -100,11 +100,58 @@ def generate_summary(transcript):
         return _fallback_summary(transcript)
 
 def _fallback_summary(text):
-    """Simple fallback if AI fails"""
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    if not sentences:
-        return "No summary available."
-    return " ".join(sentences[:3])
+    """
+    Extractive sentence frequency ranking summarizer.
+    Scores sentences based on word frequencies of non-stop-words.
+    Selects top 4 chronological sentences to build a high-quality summary.
+    """
+    try:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+        if len(sentences) <= 4:
+            return text
+
+        # 1. Compute word frequencies
+        word_frequencies = {}
+        stop_words = {
+            "the", "and", "a", "of", "to", "is", "in", "it", "that", "i", "you",
+            "he", "she", "we", "they", "this", "but", "on", "are", "for", "with",
+            "was", "as", "at", "by", "an", "be", "my", "me", "our", "us", "your",
+            "them", "have", "has", "had", "do", "does", "did", "so", "then", "there",
+            "what", "where", "when", "why", "how", "all", "any", "both", "each"
+        }
+        words = re.findall(r'\b\w+\b', text.lower())
+        for word in words:
+            if word not in stop_words:
+                word_frequencies[word] = word_frequencies.get(word, 0) + 1
+
+        if not word_frequencies:
+            return " ".join(sentences[:4])
+
+        # Normalize frequencies
+        max_freq = max(word_frequencies.values())
+        for word in word_frequencies:
+            word_frequencies[word] /= max_freq
+
+        # 2. Score sentences
+        sentence_scores = {}
+        for sent in sentences:
+            score = 0
+            sent_words = re.findall(r'\b\w+\b', sent.lower())
+            for word in sent_words:
+                if word in word_frequencies:
+                    score += word_frequencies[word]
+            # Normalize score by length to avoid bias towards long run-on sentences
+            sentence_scores[sent] = score / max(1, len(sent_words))
+
+        # 3. Sort sentences by score and take top 4
+        sorted_sentences = sorted(sentence_scores.keys(), key=lambda x: sentence_scores[x], reverse=True)
+        top_sentences = sorted_sentences[:4]
+
+        # 4. Re-order chronologically to maintain dialogue flow
+        summary_sentences = [s for s in sentences if s in top_sentences]
+        return " ".join(summary_sentences)
+    except Exception:
+        return " ".join(sentences[:3])
 
 def _chunk_text(text, chunk_size=650):
     words = text.split()

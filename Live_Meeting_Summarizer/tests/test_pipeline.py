@@ -14,9 +14,9 @@ class TestMeetingPipelineHelpers(unittest.TestCase):
         self.assertEqual(len(chunks[2].split()), 1)
 
     def test_fallback_summary_returns_first_sentences(self):
-        text = "One. Two. Three. Four."
+        text = "One. Two. Three. Four. Five. Six."
         summary = _fallback_summary(text)
-        self.assertEqual(summary, "One. Two. Three.")
+        self.assertEqual(summary, "One. Two. Three. Four.")
 
     def test_process_meeting_handles_empty_transcript(self):
         with patch("pipeline.meeting_pipeline.get_full_transcript", return_value=""):
