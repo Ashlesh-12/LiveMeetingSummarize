@@ -412,30 +412,32 @@ def main():
             if st.button("Save & Download PDF Report"):
                 actions = extract_action_items(st.session_state.transcript)
                 audio_name = st.session_state.get("current_audio_file", "") or ""
-                fname = f"exports/summary_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-                ok = save_meeting_pdf(
+                # Generate PDF entirely in memory (returns bytes, no disk write needed)
+                pdf_bytes = save_meeting_pdf(
                     transcript=st.session_state.transcript,
                     summary=st.session_state.summary,
-                    filepath=fname,
+                    filepath=None,
                     title="Meeting Intelligence Report",
                     action_items=actions,
                     username=st.session_state.get("username", "N/A"),
                     audio_filename=os.path.basename(audio_name) if audio_name else "N/A",
                 )
-                if ok:
-                    # Store PDF bytes in session_state so link survives reruns
-                    with open(fname, "rb") as f:
-                        st.session_state.pdf_bytes    = f.read()
-                        st.session_state.pdf_filename = os.path.basename(fname)
-                    st.success("Report generated! Click the link below to download.")
+                if pdf_bytes:
+                    st.session_state.pdf_bytes    = pdf_bytes
+                    st.session_state.pdf_filename = f"meeting_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                    st.success("Report generated! Click the button below to download.")
+                else:
+                    st.error("PDF generation failed. Please try again.")
 
-            # Render a reliable base64 HTML download link (avoids Streamlit UUID bug)
+            # st.download_button sets Content-Disposition header → correct filename in browser
             if st.session_state.get("pdf_bytes"):
-                link_html = _pdf_download_link(
-                    st.session_state.pdf_bytes,
-                    st.session_state.pdf_filename,
+                st.download_button(
+                    label="⬇️ Download PDF Report",
+                    data=st.session_state.pdf_bytes,
+                    file_name=st.session_state.pdf_filename,
+                    mime="application/pdf",
+                    use_container_width=True,
                 )
-                st.markdown(link_html, unsafe_allow_html=True)
 
 
     col1, col2 = st.columns([3, 1])

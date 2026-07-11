@@ -195,10 +195,13 @@ def save_meeting_pdf(
     """
     Build and save a professional Meeting Intelligence PDF report.
 
+    If filepath is None  → returns raw PDF bytes (in-memory, no disk write).
+    If filepath is given → writes to disk and returns True on success, False on error.
+
     Sections:
       1. Cover metadata block
       2. Executive Summary (parsed from structured markdown)
-      3. Key Discussion Points (from structured markdown)
+      3. Key Discussion Points
       4. Action Items & Decisions
       5. Sentiment & Text Analytics
       6. Full Transcript
@@ -354,15 +357,19 @@ def save_meeting_pdf(
             pdf.multi_cell(186, 6, sent.strip() + '.')
         pdf.ln(4)
 
-        # ── Save ──────────────────────────────────────────────────────────────
-        os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
-        pdf.output(filepath)
-        logger.info("PDF saved successfully: %s", filepath)
-        return True
+        # ── Output ────────────────────────────────────────────────────────────
+        if filepath is None:
+            # Return raw bytes — caller handles download (no disk write)
+            return bytes(pdf.output())
+        else:
+            os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+            pdf.output(filepath)
+            logger.info("PDF saved successfully: %s", filepath)
+            return True
 
     except Exception as e:
         logger.error("Error saving PDF '%s': %s", filepath, e)
-        return False
+        return None if filepath is None else False
 
 
 def _draw_sentiment_bar(pdf: MeetingReportPDF, polarity: float):
