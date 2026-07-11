@@ -10,13 +10,12 @@ bcrypt
 audio-recorder-streamlit
 librosa
 
-# Speech-to-text — CPU-only PyTorch to reduce image size
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.3.1+cpu
-torchaudio==2.3.1+cpu
+# Speech-to-text
+torch
+torchaudio
 openai-whisper
 
-# AI Summarisation — PyTorch backend only (no TensorFlow needed)
+# AI Summarisation (PyTorch backend only, avoids heavy TensorFlow)
 transformers==4.41.2
 sentencepiece
 accelerate
