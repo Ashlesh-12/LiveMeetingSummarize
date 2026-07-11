@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 import os
@@ -27,6 +26,9 @@ RECORDINGS_DIR = AUDIO_SETTINGS.get("RECORDINGS_DIR", "recordings")
 os.makedirs("exports", exist_ok=True)
 os.makedirs(RECORDINGS_DIR, exist_ok=True)
 logger = logging.getLogger(__name__)
+
+# Version sentinel — bump this string whenever PDF format changes to clear stale cached bytes
+APP_VERSION = "v2.1-pdf-fix"
 
 st.set_page_config(
     page_title="Meeting AI Pro",
@@ -180,18 +182,6 @@ st.markdown(
 )
 
 
-# --- HELPER FUNCTIONS ---
-def _pdf_download_link(pdf_bytes: bytes, filename: str, label: str = "Download PDF Report") -> str:
-    """Return an HTML anchor tag that triggers a direct browser download with the correct filename."""
-    b64 = base64.b64encode(pdf_bytes).decode()
-    return (
-        f'<a href="data:application/pdf;base64,{b64}" '
-        f'download="{filename}" '
-        f'style="display:inline-block;padding:10px 22px;background:linear-gradient(135deg,#00c0f2,#8a2be2);'
-        f'color:#fff;font-weight:600;border-radius:8px;text-decoration:none;font-size:14px;'
-        f'box-shadow:0 4px 15px rgba(0,192,242,0.3);transition:all 0.2s;">'
-        f'{label}</a>'
-    )
 
 
 def extract_action_items(text):
@@ -376,10 +366,17 @@ def main():
         "pdf_bytes": None,
         "pdf_filename": "",
         "current_audio_file": "",
+        "_app_version": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+    # Clear stale PDF bytes from old app versions (format may have changed)
+    if st.session_state.get("_app_version") != APP_VERSION:
+        st.session_state.pdf_bytes = None
+        st.session_state.pdf_filename = ""
+        st.session_state["_app_version"] = APP_VERSION
 
     with st.sidebar:
         st.title(f"User: {st.session_state.username}")
