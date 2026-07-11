@@ -1,44 +1,110 @@
+"""
+export/pdf_export.py
+Generates a professional, well-structured Meeting Intelligence Report PDF.
+
+Compatible with the structured markdown output from pipeline/meeting_pipeline.py.
+Uses fpdf2 exclusively — no external fonts required.
+"""
+
 from fpdf import FPDF, XPos, YPos
 from datetime import datetime
 from textblob import TextBlob
 import os
+import re
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-# ─── Text Sanitizer ───────────────────────────────────────────────────────────
-def _sanitize_text(text):
-    """Replace common non-latin-1 Unicode characters to prevent FPDF2 crashes."""
+# ─── Colour palette ───────────────────────────────────────────────────────────
+PRIMARY   = (41, 128, 185)    # professional blue
+ACCENT    = (39, 174,  96)    # green for action items
+DARK      = (28,  40,  51)    # near-black headings
+GREY      = (90, 100, 115)    # secondary text
+LIGHT_BG  = (245, 248, 252)   # alternating row tint
+WHITE     = (255, 255, 255)
+HEADING_BG = (41, 128, 185)   # section header background
+
+
+# ─── Sanitiser ────────────────────────────────────────────────────────────────
+def _sanitize(text: str) -> str:
+    """Strip markdown syntax and encode to latin-1 safely."""
     if not text:
         return ""
+    # Remove markdown bold/italic markers
+    text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
+    # Remove emoji (any char outside latin-1 range)
+    text = text.encode('latin-1', errors='ignore').decode('latin-1')
+    # Common unicode replacements
     replacements = {
         '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
-        '\u2013': '-', '\u2014': '-', '\u2022': '*', '\u2026': '...',
-        '\u00a0': ' ',
+        '\u2013': '-', '\u2014': '-', '\u2022': '-', '\u2026': '...',
+        '\u00a0': ' ', '\u2192': '->',
     }
-    for uni_char, replacement in replacements.items():
-        text = text.replace(uni_char, replacement)
-    return text.encode('latin-1', errors='replace').decode('latin-1')
+    for uni, asc in replacements.items():
+        text = text.replace(uni, asc)
+    return text.strip()
 
 
-# ─── Color helpers ────────────────────────────────────────────────────────────
-PRIMARY   = (0,  135, 200)   # blue accent
-DARK      = (20,  30,  50)   # near-black for headings
-GREY      = (90, 100, 115)   # secondary text
-LIGHT_BG  = (245, 247, 250)  # section background
-WHITE     = (255, 255, 255)
+def _parse_summary(summary: str):
+    """
+    Parse the structured markdown summary produced by meeting_pipeline.py.
+
+    Expected format:
+        **[emoji] Section Title**
+        Content line 1
+        Content line 2
+        ...
+
+        **[emoji] Next Section**
+        ...
+
+    Returns a list of (section_title, [content_lines]).
+    """
+    sections = []
+    current_title = None
+    current_lines = []
+
+    for raw_line in summary.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # Detect bold section header (** ... **)
+        header_match = re.match(r'^\*{2}(.+?)\*{2}$', line)
+        if header_match:
+            if current_title is not None:
+                sections.append((current_title, current_lines))
+            # Strip emoji from the title (they won't render in latin-1)
+            raw_title = header_match.group(1)
+            # Remove leading emoji + whitespace
+            clean_title = re.sub(r'^[\U00000080-\U0010ffff\s]+', '', raw_title).strip()
+            # Fallback: strip any non-ASCII
+            clean_title = clean_title.encode('latin-1', errors='ignore').decode('latin-1').strip()
+            if not clean_title:
+                clean_title = _sanitize(raw_title)
+            current_title = clean_title
+            current_lines = []
+        else:
+            # Body line — strip leading bullet characters
+            body = re.sub(r'^[•\-\*]\s*', '', line)
+            body = _sanitize(body)
+            if body:
+                current_lines.append(body)
+
+    if current_title is not None:
+        sections.append((current_title, current_lines))
+
+    return sections
 
 
+# ─── PDF class ────────────────────────────────────────────────────────────────
 class MeetingReportPDF(FPDF):
-    """Custom FPDF subclass with header and footer."""
-
     def __init__(self, report_title="Meeting Intelligence Report"):
         super().__init__()
-        self.report_title = report_title
+        self.report_title = _sanitize(report_title)
 
     def header(self):
-        # Dark top bar
         self.set_fill_color(*DARK)
         self.rect(0, 0, 210, 14, style='F')
         self.set_font('Helvetica', 'B', 9)
@@ -47,7 +113,7 @@ class MeetingReportPDF(FPDF):
         self.cell(130, 8, self.report_title, align='L')
         self.set_xy(140, 3)
         self.set_font('Helvetica', '', 8)
-        self.cell(60, 8, datetime.now().strftime('%B %d, %Y'), align='R')
+        self.cell(60, 8, datetime.now().strftime('%d %B %Y'), align='R')
         self.set_text_color(0, 0, 0)
         self.ln(16)
 
@@ -61,27 +127,27 @@ class MeetingReportPDF(FPDF):
         self.cell(95, 10, f'Page {self.page_no()}', align='R')
         self.set_text_color(0, 0, 0)
 
-    # ── Section helpers ───────────────────────────────────────
-    def section_header(self, icon_char, title, color=PRIMARY):
-        """Renders a coloured left-bar section title."""
-        self.ln(4)
-        # Accent bar
-        self.set_fill_color(*color)
-        self.rect(self.get_x(), self.get_y(), 3, 8, style='F')
-        self.set_x(self.get_x() + 5)
-        self.set_font('Helvetica', 'B', 13)
-        self.set_text_color(*DARK)
-        self.cell(0, 8, f"{icon_char}  {title}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        self.ln(2)
+    # ── Layout helpers ────────────────────────────────────────────────────────
 
-    def hr(self):
-        self.set_draw_color(*PRIMARY)
+    def section_header(self, title: str, color=PRIMARY):
+        self.ln(5)
+        y = self.get_y()
+        self.set_fill_color(*color)
+        self.rect(10, y, 190, 10, style='F')
+        self.set_font('Helvetica', 'B', 11)
+        self.set_text_color(*WHITE)
+        self.set_xy(14, y + 1)
+        self.cell(182, 8, title.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_text_color(0, 0, 0)
+        self.ln(3)
+
+    def hr(self, color=PRIMARY):
+        self.set_draw_color(*color)
         self.set_line_width(0.3)
         self.line(10, self.get_y(), 200, self.get_y())
         self.ln(3)
 
-    def kv_row(self, label, value, shade=False):
-        """Renders a two-column key-value row, optionally shaded."""
+    def kv_row(self, label: str, value: str, shade=False):
         if shade:
             self.set_fill_color(*LIGHT_BG)
             self.rect(10, self.get_y(), 190, 7, style='F')
@@ -93,12 +159,21 @@ class MeetingReportPDF(FPDF):
         self.set_text_color(*DARK)
         self.cell(130, 7, str(value), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    def bullet_item(self, index, text, shade=False):
+    def body_paragraph(self, text: str):
+        self.set_font('Helvetica', '', 10)
+        self.set_text_color(*DARK)
+        self.set_x(12)
+        self.multi_cell(186, 6, text)
+        self.ln(2)
+
+    def bullet_row(self, index: int, text: str, shade=False, color=PRIMARY):
+        """Render a numbered bullet row."""
         if shade:
             self.set_fill_color(*LIGHT_BG)
-            self.rect(10, self.get_y(), 190, 8, style='F')
+            line_h = max(8, 6 * (len(text) // 85 + 1))
+            self.rect(10, self.get_y(), 190, line_h, style='F')
         self.set_font('Helvetica', 'B', 9)
-        self.set_text_color(*PRIMARY)
+        self.set_text_color(*color)
         self.set_x(12)
         self.cell(8, 8, f"{index}.")
         self.set_font('Helvetica', '', 9)
@@ -118,144 +193,214 @@ def save_meeting_pdf(
     audio_filename=None,
 ):
     """
-    Save a full professional meeting intelligence report as PDF.
+    Build and save a professional Meeting Intelligence PDF report.
 
     Sections:
-      1. Cover header (meta-data)
-      2. Executive Summary
-      3. Action Items
-      4. Sentiment & Text Analytics
-      5. Full Transcript
+      1. Cover metadata block
+      2. Executive Summary (parsed from structured markdown)
+      3. Key Discussion Points (from structured markdown)
+      4. Action Items & Decisions
+      5. Sentiment & Text Analytics
+      6. Full Transcript
     """
     try:
-        # Sanitise
-        title          = _sanitize_text(title)
-        transcript     = _sanitize_text(transcript)
-        summary        = _sanitize_text(summary)
-        action_items   = [_sanitize_text(a) for a in (action_items or [])]
-        username       = _sanitize_text(username or "N/A")
-        audio_filename = _sanitize_text(audio_filename or "N/A")
+        # ── Sanitise inputs ────────────────────────────────────────────────────
+        title          = _sanitize(title)
+        transcript     = _sanitize(transcript)
+        summary_raw    = summary or ""          # keep raw for parsing
+        action_items   = [_sanitize(a) for a in (action_items or [])]
+        username       = _sanitize(username or "N/A")
+        audio_filename = _sanitize(audio_filename or "N/A")
 
-        # Derive analytics
-        words    = transcript.split()
-        wc       = len(words)
-        cc       = len(transcript)
-        sents    = [s.strip() for s in transcript.split('.') if s.strip()]
-        sc       = len(sents)
+        # ── Parse structured summary ──────────────────────────────────────────
+        parsed_sections = _parse_summary(summary_raw)
+
+        # If no structured sections found, treat whole summary as overview
+        if not parsed_sections:
+            parsed_sections = [("Meeting Overview", [_sanitize(summary_raw)])]
+
+        # Separate action items from summary if embedded
+        summary_sections = []
+        embedded_actions = []
+        for sec_title, sec_lines in parsed_sections:
+            t_lower = sec_title.lower()
+            if any(k in t_lower for k in ("action", "decision", "task")):
+                embedded_actions.extend(sec_lines)
+            else:
+                summary_sections.append((sec_title, sec_lines))
+
+        # Merge action items (from pipeline + from sidebar extractor, deduplicated)
+        all_actions = list(dict.fromkeys(embedded_actions + action_items))
+
+        # ── Analytics ─────────────────────────────────────────────────────────
+        words   = transcript.split()
+        wc      = len(words)
+        sents   = [s.strip() for s in transcript.split('.') if len(s.strip()) > 3]
+        sc      = len(sents)
 
         try:
-            blob        = TextBlob(transcript)
-            polarity    = blob.sentiment.polarity
-            subjectivity= blob.sentiment.subjectivity
-            sentiment   = ("Positive" if polarity > 0.1
-                           else "Negative" if polarity < -0.1
-                           else "Neutral")
+            blob         = TextBlob(transcript)
+            polarity     = blob.sentiment.polarity
+            subjectivity = blob.sentiment.subjectivity
+            sentiment    = ("Positive" if polarity > 0.1
+                            else "Negative" if polarity < -0.1
+                            else "Neutral")
         except Exception:
             polarity = subjectivity = 0.0
             sentiment = "N/A"
 
-        # ── Build PDF ──────────────────────────────────────────
+        # ── Build PDF ─────────────────────────────────────────────────────────
         pdf = MeetingReportPDF(report_title=title)
         pdf.set_auto_page_break(auto=True, margin=18)
 
-        # ═══════════════════════════════════════════════════════
-        # PAGE 1 – Cover + Summary + Actions
-        # ═══════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════════════════
+        # PAGE 1 — Hero banner + Metadata + Summary sections
+        # ═══════════════════════════════════════════════════════════════════════
         pdf.add_page()
 
-        # Hero title block
+        # Hero banner
+        banner_y = pdf.get_y()
         pdf.set_fill_color(*PRIMARY)
-        pdf.rect(10, pdf.get_y(), 190, 28, style='F')
-        pdf.set_font('Helvetica', 'B', 22)
+        pdf.rect(10, banner_y, 190, 30, style='F')
+        pdf.set_font('Helvetica', 'B', 20)
         pdf.set_text_color(*WHITE)
-        pdf.set_xy(14, pdf.get_y() + 4)
-        pdf.cell(182, 10, title, align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font('Helvetica', '', 10)
+        pdf.set_xy(14, banner_y + 5)
+        pdf.cell(182, 11, title, align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('Helvetica', '', 9)
         pdf.set_x(14)
-        pdf.cell(182, 10, 'Automated Meeting Intelligence Report', align='C',
-                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(182, 9, 'Automated Meeting Intelligence Report  |  Meeting AI Pro',
+                 align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_text_color(0, 0, 0)
-        pdf.ln(6)
+        pdf.ln(8)
 
-        # Metadata table
-        pdf.section_header('[i]', 'Report Metadata')
-        pdf.hr()
+        # Metadata
+        pdf.section_header('Report Metadata')
         meta = [
-            ("Generated on",   datetime.now().strftime('%Y-%m-%d  %H:%M:%S')),
-            ("Recorded by",    username),
-            ("Audio file",     audio_filename),
-            ("Word count",     f"{wc:,}  words"),
-            ("Duration est.",  f"~{max(1, wc // 130)} min"),
+            ("Generated on",    datetime.now().strftime('%Y-%m-%d  %H:%M:%S')),
+            ("Recorded by",     username),
+            ("Audio file",      audio_filename),
+            ("Word count",      f"{wc:,} words"),
+            ("Estimated duration", f"~{max(1, wc // 130)} minutes"),
         ]
         for i, (k, v) in enumerate(meta):
             pdf.kv_row(k, v, shade=(i % 2 == 0))
         pdf.ln(4)
 
-        # Executive Summary
-        pdf.section_header('[S]', 'Executive Summary')
-        pdf.hr()
-        pdf.set_font('Helvetica', '', 10)
-        pdf.set_text_color(*DARK)
-        for para in summary.split('\n'):
-            if para.strip():
-                pdf.multi_cell(190, 6, para.strip())
-                pdf.ln(2)
-        pdf.ln(4)
+        # Summary sections (Overview + Key Points)
+        for sec_title, sec_lines in summary_sections:
+            pdf.section_header(sec_title)
+            if not sec_lines:
+                pdf.set_font('Helvetica', 'I', 9)
+                pdf.set_text_color(*GREY)
+                pdf.set_x(12)
+                pdf.cell(0, 7, "No content available.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_text_color(0, 0, 0)
+            else:
+                is_bullets = len(sec_lines) > 1
+                for idx, line in enumerate(sec_lines):
+                    if is_bullets:
+                        pdf.bullet_row(idx + 1, line, shade=(idx % 2 == 0))
+                    else:
+                        pdf.body_paragraph(line)
+            pdf.ln(2)
 
         # Action Items
-        pdf.section_header('[A]', 'Action Items')
-        pdf.hr()
-        if action_items:
-            for i, item in enumerate(action_items, 1):
-                pdf.bullet_item(i, item, shade=(i % 2 == 0))
+        pdf.section_header('Action Items & Decisions', color=ACCENT)
+        if all_actions:
+            for i, item in enumerate(all_actions[:15], 1):   # cap at 15
+                pdf.bullet_row(i, item, shade=(i % 2 == 0), color=ACCENT)
         else:
             pdf.set_font('Helvetica', 'I', 9)
             pdf.set_text_color(*GREY)
-            pdf.cell(0, 7, "No action items detected.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_x(12)
+            pdf.cell(0, 7, "No specific action items detected.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(0, 0, 0)
         pdf.ln(4)
 
-        # ═══════════════════════════════════════════════════════
-        # PAGE 2 – Analytics + Full Transcript
-        # ═══════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════════════════
+        # PAGE 2 — Analytics + Full Transcript
+        # ═══════════════════════════════════════════════════════════════════════
         pdf.add_page()
 
-        # Analytics section
-        pdf.section_header('[~]', 'Sentiment & Text Analytics')
-        pdf.hr()
+        # Analytics
+        pdf.section_header('Sentiment & Text Analytics')
         analytics = [
-            ("Sentiment",      sentiment),
-            ("Polarity score", f"{polarity:.3f}  (-1.0 very negative  ...  +1.0 very positive)"),
-            ("Subjectivity",   f"{subjectivity:.3f}  (0.0 fully objective  ...  1.0 fully subjective)"),
-            ("Total words",    f"{wc:,}"),
-            ("Total characters", f"{cc:,}"),
-            ("Sentence count", f"{sc}"),
-            ("Avg words/sent", f"{wc // max(sc, 1)}"),
+            ("Overall Sentiment",  sentiment),
+            ("Polarity Score",     f"{polarity:+.3f}   (-1.0 very negative  to  +1.0 very positive)"),
+            ("Subjectivity",       f"{subjectivity:.3f}   (0.0 fully objective  to  1.0 fully subjective)"),
+            ("Total Words",        f"{wc:,}"),
+            ("Total Characters",   f"{len(transcript):,}"),
+            ("Sentence Count",     str(sc)),
+            ("Avg Words / Sent",   str(wc // max(sc, 1))),
         ]
         for i, (k, v) in enumerate(analytics):
             pdf.kv_row(k, v, shade=(i % 2 == 0))
         pdf.ln(6)
 
-        # Full transcript
-        pdf.section_header('[T]', 'Full Transcript')
-        pdf.hr()
+        # Sentiment bar (visual indicator)
+        _draw_sentiment_bar(pdf, polarity)
+        pdf.ln(6)
+
+        # Full Transcript
+        pdf.section_header('Full Transcript')
         pdf.set_font('Helvetica', '', 9)
         pdf.set_text_color(*DARK)
-        # Print sentence-by-sentence with light shading every other line
         for i, sent in enumerate(sents):
             if i % 2 == 0:
-                self_y = pdf.get_y()
+                y_now = pdf.get_y()
                 pdf.set_fill_color(*LIGHT_BG)
-                pdf.rect(10, self_y, 190, 6, style='F')
+                pdf.rect(10, y_now, 190, 6, style='F')
             pdf.set_x(12)
             pdf.multi_cell(186, 6, sent.strip() + '.')
         pdf.ln(4)
 
-        # ── Save ──────────────────────────────────────────────
+        # ── Save ──────────────────────────────────────────────────────────────
         os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
         pdf.output(filepath)
         logger.info("PDF saved successfully: %s", filepath)
         return True
 
     except Exception as e:
-        logger.error("Error saving PDF to %s: %s", filepath, str(e))
+        logger.error("Error saving PDF '%s': %s", filepath, e)
         return False
+
+
+def _draw_sentiment_bar(pdf: MeetingReportPDF, polarity: float):
+    """Draw a simple horizontal sentiment gauge bar."""
+    bar_x, bar_y = 12, pdf.get_y()
+    bar_w, bar_h = 186, 8
+
+    # Background track
+    pdf.set_fill_color(220, 220, 220)
+    pdf.rect(bar_x, bar_y, bar_w, bar_h, style='F')
+
+    # Filled portion (0 = left, 1 = right; neutral at centre)
+    fill_ratio = (polarity + 1.0) / 2.0        # map [-1,1] -> [0,1]
+    fill_w = bar_w * fill_ratio
+
+    # Colour: green = positive, red = negative, grey = neutral
+    if polarity > 0.1:
+        bar_color = (39, 174, 96)
+    elif polarity < -0.1:
+        bar_color = (192, 57, 43)
+    else:
+        bar_color = (127, 140, 141)
+
+    pdf.set_fill_color(*bar_color)
+    pdf.rect(bar_x, bar_y, fill_w, bar_h, style='F')
+
+    # Centre marker
+    mid_x = bar_x + bar_w / 2
+    pdf.set_draw_color(*DARK)
+    pdf.set_line_width(0.5)
+    pdf.line(mid_x, bar_y, mid_x, bar_y + bar_h)
+
+    # Labels
+    pdf.set_xy(bar_x, bar_y + bar_h + 1)
+    pdf.set_font('Helvetica', '', 7)
+    pdf.set_text_color(*GREY)
+    pdf.cell(bar_w / 3, 5, 'Negative', align='L')
+    pdf.cell(bar_w / 3, 5, 'Neutral', align='C')
+    pdf.cell(bar_w / 3, 5, 'Positive', align='R')
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(7)
