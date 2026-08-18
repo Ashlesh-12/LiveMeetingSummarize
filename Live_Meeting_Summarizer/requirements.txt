@@ -1,0 +1,25 @@
+# Core app
+streamlit>=1.32.0
+numpy
+scipy
+soundfile
+python-dotenv
+bcrypt
+
+# Audio (browser-based recording — no sounddevice needed)
+audio-recorder-streamlit
+librosa
+
+# Speech-to-text (Whisper uses torch internally)
+torch
+torchaudio
+openai-whisper
+
+# Analytics & export
+matplotlib
+scikit-learn
+textblob
+fpdf2
+
+# Misc
+protobuf>=3.20,<6
