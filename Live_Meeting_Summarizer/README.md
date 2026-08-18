@@ -13,6 +13,8 @@ short_description: Live meeting transcription, AI summarization & analytics
 
 # Meeting AI Pro 🎙️
 
+🚀 **Live App:** [https://meeting-ai-pro.streamlit.app/](https://meeting-ai-pro.streamlit.app/)
+
 > **Live transcription · AI summarization · Action items · Sentiment analytics · PDF reports**
 
 A full-stack AI meeting assistant built with OpenAI Whisper (speech-to-text), DistilBART (summarization), and Streamlit.
