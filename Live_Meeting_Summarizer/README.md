@@ -35,3 +35,21 @@ A full-stack AI meeting assistant built with OpenAI Whisper (speech-to-text), Di
 | `demo` | `demo1234` |
 
 Use **Register** to create your own account.
+
+## Running Locally
+
+If you clone or download this repository to run it on your own machine, follow these steps:
+
+1. **Open a terminal** and navigate into the project folder:
+   ```bash
+   cd Live_Meeting_Summarizer
+   ```
+2. **Install the required dependencies** (a virtual environment is recommended):
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Run the Streamlit app:**
+   ```bash
+   streamlit run app.py
+   ```
+4. The app will automatically open in your web browser at `http://localhost:8501`.
